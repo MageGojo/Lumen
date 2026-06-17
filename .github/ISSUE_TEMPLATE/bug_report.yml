@@ -1,0 +1,68 @@
+name: 🐛 Bug 反馈
+description: 下载失败、崩溃、界面异常等问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: 感谢反馈!请尽量填写完整,便于定位问题。
+  - type: textarea
+    id: what
+    attributes:
+      label: 问题描述
+      description: 发生了什么?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 粘贴某链接 / 打开某功能
+        2. 点击 ...
+        3. 出现 ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: false
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Lumen 版本
+      placeholder: 例如 v1.0.0(关于 / Releases 页可见)
+    validations:
+      required: false
+  - type: dropdown
+    id: source
+    attributes:
+      label: 涉及的下载类型
+      options:
+        - HTTP 直链
+        - 磁力 / 种子
+        - 视频 / 图文解析
+        - 浏览器扩展接管
+        - 自定义 UA / 请求头
+        - 其他 / 不确定
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: 有的话贴上,能极大加速排查。
+    validations:
+      required: false

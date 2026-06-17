@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      :root {
+        --bg: #0a0f1c;
+        --panel: rgba(255, 255, 255, 0.04);
+        --fg: #f2f6ff;
+        --muted: #9fb0cc;
+        --subtle: #6b7a98;
+        --accent: #38bdf8;
+        --accent2: #6366f1;
+        --border: rgba(255, 255, 255, 0.09);
+        --fill: rgba(255, 255, 255, 0.05);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        width: 390px;
+        max-height: 560px;
+        font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
+        background:
+          radial-gradient(120% 80% at 100% 0%, rgba(56, 189, 248, 0.12), transparent 60%),
+          radial-gradient(120% 80% at 0% 0%, rgba(99, 102, 241, 0.12), transparent 55%),
+          var(--bg);
+        color: var(--fg);
+      }
+      .header {
+        display: flex; align-items: center; gap: 9px;
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .brand {
+        width: 28px; height: 28px; border-radius: 9px;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        display: flex; align-items: center; justify-content: center;
+        font-weight: 800; color: #04122a; font-size: 14px;
+        box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35);
+      }
+      .title { font-size: 14px; font-weight: 700; letter-spacing: .2px; }
+      .sub { font-size: 11px; color: var(--subtle); margin-top: 1px; }
+      .status {
+        margin-left: auto; display: flex; align-items: center; gap: 6px;
+        font-size: 11px; color: var(--muted);
+        padding: 4px 9px; border: 1px solid var(--border);
+        border-radius: 999px; background: var(--fill);
+      }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--subtle); }
+      .dot.on { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.7); }
+      .dot.off { background: #f43f5e; }
+
+      .toggleRow {
+        display: flex; align-items: center; gap: 10px;
+        margin: 12px 14px 4px; padding: 11px 13px;
+        border: 1px solid var(--border); border-radius: 13px;
+        background: var(--panel);
+      }
+      .toggleRow .tx { display: flex; flex-direction: column; }
+      .toggleRow .tt { font-size: 13px; font-weight: 700; }
+      .toggleRow .td { font-size: 11px; color: var(--subtle); margin-top: 1px; }
+      .switch {
+        margin-left: auto; cursor: pointer; user-select: none;
+        width: 116px; height: 34px; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--fill);
+        position: relative; transition: all .18s;
+      }
+      .switch .knob {
+        position: absolute; top: 3px; left: 3px; height: 26px;
+        min-width: 64px; padding: 0 10px; border-radius: 999px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 11px; font-weight: 800; color: var(--muted);
+        background: rgba(255,255,255,0.06); transition: all .18s;
+      }
+      .switch.on { background: linear-gradient(135deg, rgba(56,189,248,0.28), rgba(99,102,241,0.28)); border-color: rgba(56,189,248,0.5); }
+      .switch.on .knob { left: calc(100% - 67px); color: #eaf6ff; background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+
+      .actions { display: flex; gap: 8px; padding: 8px 14px 4px; align-items: center; }
+      button {
+        font-family: inherit; cursor: pointer; border-radius: 10px;
+        border: 1px solid var(--border); background: var(--fill);
+        color: var(--fg); font-size: 12.5px; font-weight: 600;
+        padding: 8px 11px; transition: all .15s;
+      }
+      button:hover { background: rgba(255,255,255,0.1); }
+      button.primary {
+        background: linear-gradient(135deg, rgba(56,189,248,0.22), rgba(99,102,241,0.22));
+        border-color: rgba(56,189,248,0.4);
+      }
+      button.primary:hover { background: linear-gradient(135deg, rgba(56,189,248,0.34), rgba(99,102,241,0.34)); }
+      button:disabled { opacity: .5; cursor: default; }
+      .grow { flex: 1; }
+      .list { overflow-y: auto; max-height: 350px; padding: 4px 10px 12px; }
+      .section { font-size: 10.5px; font-weight: 800; letter-spacing: .6px; color: var(--subtle); padding: 10px 6px 4px; text-transform: uppercase; }
+      .empty { color: var(--subtle); font-size: 12.5px; text-align: center; padding: 28px 18px; line-height: 1.7; white-space: pre-line; }
+      .item {
+        border: 1px solid var(--border); background: var(--panel);
+        border-radius: 13px; padding: 11px; margin: 6px 4px;
+        backdrop-filter: blur(8px);
+      }
+      .item .meta { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+      .badge { font-size: 10px; font-weight: 800; letter-spacing: .3px; padding: 2px 8px; border-radius: 999px; }
+      .k-dl { color: #93c5fd; background: rgba(37,99,235,0.18); }
+      .k-hls { color: #f0abfc; background: rgba(217,70,239,0.16); }
+      .k-video { color: #7dd3fc; background: rgba(56,189,248,0.16); }
+      .k-audio { color: #fcd34d; background: rgba(245,158,11,0.16); }
+      .hostname { font-size: 11px; color: var(--subtle); }
+      .size { font-size: 11px; color: var(--subtle); margin-left: auto; font-variant-numeric: tabular-nums; }
+      .name { font-size: 12.5px; font-weight: 600; color: var(--fg); word-break: break-all; line-height: 1.35; max-height: 34px; overflow: hidden; }
+      .row { display: flex; gap: 8px; margin-top: 9px; }
+      .footer { padding: 8px 14px 12px; border-top: 1px solid var(--border); display: flex; align-items: center; }
+      .link { font-size: 11px; color: var(--muted); cursor: pointer; }
+      .link:hover { color: var(--accent); }
+      .toast { position: sticky; bottom: 0; margin: 0 10px; font-size: 12px; padding: 8px 10px; border-radius: 10px; display: none; }
+      .toast.ok { display: block; background: rgba(34,197,94,0.16); color: #bbf7d0; }
+      .toast.err { display: block; background: rgba(244,63,94,0.16); color: #fecdd3; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="brand">L</div>
+      <div>
+        <div class="title">Lumen</div>
+        <div class="sub">下载接管</div>
+      </div>
+      <div class="status"><span id="dot" class="dot"></span><span id="statusText">检测中…</span></div>
+    </div>
+
+    <div class="toggleRow">
+      <div class="tx">
+        <span class="tt">接管浏览器下载</span>
+        <span class="td">浏览器的下载将自动交给 Lumen</span>
+      </div>
+      <div id="intercept" class="switch"><span class="knob">接管中</span></div>
+    </div>
+
+    <div class="actions">
+      <button id="parsePage" class="primary grow">解析当前页面</button>
+      <button id="clear">清空</button>
+    </div>
+
+    <div id="list" class="list"></div>
+    <div id="toast" class="toast"></div>
+
+    <div class="footer">
+      <span id="openOptions" class="link">设置</span>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

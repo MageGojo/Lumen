@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      body {
+        font-family: -apple-system, "PingFang SC", sans-serif;
+        background:
+          radial-gradient(120% 60% at 100% 0%, rgba(56,189,248,0.10), transparent 60%),
+          #0a0f1c;
+        color: #f2f6ff; margin: 0; padding: 30px; max-width: 560px;
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p.lead { color: #9fb0cc; font-size: 12.5px; line-height: 1.6; margin: 0 0 22px; }
+      .field { margin-bottom: 18px; }
+      label { font-size: 13px; font-weight: 700; display: block; margin-bottom: 7px; }
+      .hint { font-size: 11.5px; color: #6b7a98; margin-top: 5px; line-height: 1.5; }
+      input[type="number"], input[type="text"] {
+        width: 220px; font-family: inherit; font-size: 13px;
+        background: rgba(255,255,255,0.05); color: #f2f6ff;
+        border: 1px solid rgba(255,255,255,0.12); border-radius: 10px;
+        padding: 9px 12px; outline: none;
+      }
+      input[type="text"] { width: 320px; }
+      input:focus { border-color: rgba(56,189,248,0.6); }
+      .check { display: flex; align-items: center; gap: 9px; }
+      .check input { width: 17px; height: 17px; accent-color: #38bdf8; }
+      .check label { margin: 0; font-weight: 600; }
+      button {
+        font-family: inherit; cursor: pointer; font-size: 13px; font-weight: 700;
+        background: linear-gradient(135deg, rgba(56,189,248,0.22), rgba(99,102,241,0.22));
+        color: #f2f6ff; border: 1px solid rgba(56,189,248,0.4); border-radius: 10px;
+        padding: 10px 20px;
+      }
+      button:hover { background: linear-gradient(135deg, rgba(56,189,248,0.34), rgba(99,102,241,0.34)); }
+      .saved { color: #38bdf8; font-size: 12.5px; margin-top: 14px; height: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>Lumen 下载接管 · 设置</h1>
+    <p class="lead">接管浏览器下载并交给桌面应用多线程下载(IDM 同款)。下面的端口需与应用「设置 → 浏览器扩展」一致。</p>
+
+    <div class="field check">
+      <input id="intercept" type="checkbox" />
+      <label for="intercept">接管浏览器下载(核心功能)</label>
+    </div>
+
+    <div class="field check">
+      <input id="sniff" type="checkbox" />
+      <label for="sniff">同时嗅探页面视频 / 媒体(可选)</label>
+    </div>
+
+    <div class="field">
+      <label for="port">本地桥端口</label>
+      <input id="port" type="number" min="1024" max="65535" placeholder="8787" />
+      <div class="hint">默认 8787,需与应用里显示的端口一致。</div>
+    </div>
+
+    <div class="field">
+      <label for="minSizeMB">最小接管体积(MB)</label>
+      <input id="minSizeMB" type="number" min="0" max="100000" placeholder="0" />
+      <div class="hint">小于该体积的下载交给浏览器自己处理。0 = 全部接管。</div>
+    </div>
+
+    <div class="field">
+      <label for="skipExt">不接管的后缀</label>
+      <input id="skipExt" type="text" placeholder="m3u8,mpd" />
+      <div class="hint">用英文逗号分隔。这些类型仍由浏览器/页面处理,默认 m3u8,mpd。</div>
+    </div>
+
+    <button id="save">保存</button>
+    <div id="saved" class="saved"></div>
+    <script src="options.js"></script>
+  </body>
+</html>
