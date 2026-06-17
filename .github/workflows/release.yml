@@ -85,14 +85,15 @@ jobs:
         run: |
           choco install innosetup --no-progress -y
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" windows/installer.iss
-          # ISCC resolves OutputDir from the script dir; locate the produced
-          # installer wherever it landed and make sure it ends up in dist/.
+          # With SourceDir=.. the installer is written to dist/, but locate it
+          # defensively and copy into dist/ only if it isn't already there.
           $exe = Get-ChildItem -Recurse -Filter Lumen-Windows-Setup.exe |
                  Select-Object -First 1
           if (-not $exe) { throw "Installer exe not found after ISCC" }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item $exe.FullName dist/Lumen-Windows-Setup.exe -Force
-          Write-Host "Installer ready: dist/Lumen-Windows-Setup.exe"
+          $dest = Join-Path (Resolve-Path dist).Path "Lumen-Windows-Setup.exe"
+          if ($exe.FullName -ne $dest) { Copy-Item $exe.FullName $dest -Force }
+          Write-Host "Installer ready: $dest"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
