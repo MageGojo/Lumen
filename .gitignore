@@ -1,6 +1,9 @@
 # Project design docs / internal notes (kept local, not published)
 docs/
 
+# Local release build output (dmg/zip staging) — built by CI for releases
+dist/
+
 # Misc local
 .cursor/
 
