@@ -8,6 +8,10 @@
 #define MyAppExeName "lumen.exe"
 
 [Setup]
+; The script lives in windows/, but the Flutter build output and the dist/
+; folder are at the repository root. Resolve all relative paths (the [Files]
+; Source below and OutputDir) from the repo root instead of windows/.
+SourceDir=..
 AppId={{8F4A2E10-9C3B-4D7E-A1F6-2B5C9D0E7A33}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
