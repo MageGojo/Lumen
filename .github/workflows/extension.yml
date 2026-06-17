@@ -1,0 +1,37 @@
+name: Package extension (no app rebuild)
+
+# The browser extension is pure JS/HTML — updating it never recompiles the
+# desktop app. On extension changes we just (re)package it and publish a
+# downloadable zip under the rolling "extension-latest" pre-release.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "browser_extension/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip extension
+        run: |
+          cd browser_extension
+          zip -r ../Lumen-Extension.zip . -x '*.DS_Store'
+
+      - name: Refresh the "extension-latest" pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete extension-latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create extension-latest --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Browser extension (latest)" \
+            --notes "Lumen 下载接管 (MV3). Install: unzip, open chrome://extensions, enable Developer mode, Load unpacked. Auto-updated on extension changes — no app rebuild needed."
+          gh release upload extension-latest Lumen-Extension.zip \
+            --repo "$GITHUB_REPOSITORY" --clobber

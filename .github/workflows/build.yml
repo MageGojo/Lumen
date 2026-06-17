@@ -1,0 +1,99 @@
+name: Build (reusable)
+
+# Reusable build for the desktop app assets. Builds the macOS .dmg and the
+# Windows .zip + Inno Setup installer, then uploads them to an existing
+# GitHub Release identified by `release_tag` (the caller creates the release).
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Tag of an existing GitHub Release to upload assets to
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build macOS (release)
+        run: flutter build macos --release
+
+      - name: Package .dmg
+        run: |
+          set -e
+          APP="build/macos/Build/Products/Release/Lumen.app"
+          mkdir -p dist/dmg
+          cp -R "$APP" dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "Lumen" -srcfolder dist/dmg \
+            -ov -format UDZO dist/Lumen-macOS.dmg
+
+      - name: Upload macOS asset to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.release_tag }}" dist/Lumen-macOS.dmg \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build Windows (release)
+        run: flutter build windows --release
+
+      - name: Package .zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* `
+            -DestinationPath dist/Lumen-Windows.zip -Force
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" windows/installer.iss
+          # With SourceDir=.. the installer is written to dist/, but locate it
+          # defensively and copy into dist/ only if it isn't already there.
+          $exe = Get-ChildItem -Recurse -Filter Lumen-Windows-Setup.exe |
+                 Select-Object -First 1
+          if (-not $exe) { throw "Installer exe not found after ISCC" }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $dest = Join-Path (Resolve-Path dist).Path "Lumen-Windows-Setup.exe"
+          if ($exe.FullName -ne $dest) { Copy-Item $exe.FullName $dest -Force }
+
+      - name: Upload Windows assets to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.release_tag }}" \
+            dist/Lumen-Windows.zip dist/Lumen-Windows-Setup.exe \
+            --repo "$GITHUB_REPOSITORY" --clobber

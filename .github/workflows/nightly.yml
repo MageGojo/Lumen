@@ -1,0 +1,40 @@
+name: Nightly (auto-build on app changes)
+
+# Auto-compile the desktop assets ONLY when the app's own source changes on
+# main (Dart/native/platform/deps). Browser-extension, docs and markdown
+# changes are intentionally excluded so they never trigger an app rebuild.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lib/**"
+      - "native/**"
+      - "macos/**"
+      - "windows/**"
+      - "assets/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recreate the rolling "nightly" pre-release at this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create nightly --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Nightly (latest main)" \
+            --notes "Auto-built from \`main\` @ ${GITHUB_SHA:0:7}. Unsigned test build — use a tagged release for stable downloads."
+
+  assets:
+    needs: prepare
+    uses: ./.github/workflows/build.yml
+    with:
+      release_tag: nightly
