@@ -20,6 +20,8 @@ const MAX_CAPTURES = 60;
 const MAX_MEDIA = 50;
 
 let appOnline = false;
+let lastPingAt = 0;
+const PING_TTL_MS = 2500; // reuse a recent ping result instead of pinging per download
 
 async function getSettings() {
   return chrome.storage.sync.get(DEFAULT_SETTINGS);
@@ -56,14 +58,22 @@ async function pingApp() {
   const port = await getPort();
   try {
     const res = await fetch(`http://127.0.0.1:${port}/ping`, {
-      signal: AbortSignal.timeout(1500),
+      signal: AbortSignal.timeout(1200),
     });
     const j = await res.json();
     appOnline = !!j.ok;
   } catch (e) {
     appOnline = false;
   }
+  lastPingAt = Date.now();
   return appOnline;
+}
+
+// Cached online check for the hot download path: a fresh ping result is reused
+// for PING_TTL_MS so a burst of downloads never pings (or stalls) per item.
+async function isAppOnline() {
+  if (Date.now() - lastPingAt < PING_TTL_MS) return appOnline;
+  return pingApp();
 }
 
 async function sendToApp(payload) {
@@ -116,17 +126,30 @@ async function recordCapture(item) {
 
 // ---- Download interception (the core IDM-style feature) ---------------------
 
+// Downloads we re-create ourselves (the offline safety net) — never re-handle,
+// so a missed attribution can't turn it into an infinite cancel→restore loop.
+const selfDownloadIds = new Set();
+// Short-term de-dupe: one logical download (or a quick re-fire of the same URL)
+// must not be handed off twice, which would pop the app window twice.
+const inflightUrls = new Set();
+const recentlySent = new Map(); // url -> timestamp
+const DEDUP_MS = 6000;
+
+function sweepRecent() {
+  const cutoff = Date.now() - DEDUP_MS;
+  for (const [u, t] of recentlySent) if (t < cutoff) recentlySent.delete(u);
+}
+
 chrome.downloads.onCreated.addListener(async (item) => {
   try {
-    console.log('[SG] download.onCreated', item.url || item.finalUrl, 'by', item.byExtensionId || 'browser');
-    // Ignore the fallback downloads we create ourselves (avoids a loop).
+    if (selfDownloadIds.has(item.id)) {
+      selfDownloadIds.delete(item.id);
+      return;
+    }
     if (item.byExtensionId && item.byExtensionId === chrome.runtime.id) return;
 
     const s = await getSettings();
-    if (!s.intercept) {
-      console.log('[SG] intercept disabled — skipping');
-      return;
-    }
+    if (!s.intercept) return;
 
     const url = item.finalUrl || item.url || '';
     if (!/^https?:\/\//i.test(url)) return; // skip blob:, data:, file:
@@ -142,36 +165,51 @@ chrome.downloads.onCreated.addListener(async (item) => {
       return;
     }
 
-    // Take over immediately: cancel the browser download, then hand off. If the
-    // app is unreachable or refuses, restore the native download so a file is
-    // never silently lost. (No pre-ping gate — that was too easy to fail.)
-    try {
-      await chrome.downloads.cancel(item.id);
-    } catch (e) {}
-    try {
-      await chrome.downloads.erase({ id: item.id });
-    } catch (e) {}
+    // De-dupe: if this exact URL is already in flight or was just sent, silently
+    // take over the duplicate (so the browser keeps no copy) but don't hand it
+    // to the app again — avoids a second window pop for one download.
+    sweepRecent();
+    if (inflightUrls.has(url) || recentlySent.has(url)) {
+      try { await chrome.downloads.cancel(item.id); } catch (e) {}
+      try { await chrome.downloads.erase({ id: item.id }); } catch (e) {}
+      return;
+    }
 
-    const payload = { url, referer: item.referrer || '', title: name };
-    console.log('[SG] taking over ->', url);
-    const res = await sendToApp(payload);
-    console.log('[SG] handoff result', res);
+    // Detection gate (the safety net the README promises): only take over when
+    // the app is actually reachable. If it isn't, leave the browser download
+    // completely untouched — never cancel it, never spam the bridge.
+    if (!(await isAppOnline())) return;
 
-    if (res && res.ok) {
-      await recordCapture({
-        url,
-        kind: '下载',
-        name: name || host(url),
-        host: host(url),
-        size: item.fileSize > 0 ? item.fileSize : 0,
-        referer: item.referrer || '',
-        ts: Date.now(),
-      });
-    } else {
-      // App unreachable or refused (e.g. HLS) — restore native download.
-      try {
-        await chrome.downloads.download({ url });
-      } catch (e) {}
+    inflightUrls.add(url);
+    try {
+      try { await chrome.downloads.cancel(item.id); } catch (e) {}
+      try { await chrome.downloads.erase({ id: item.id }); } catch (e) {}
+
+      const payload = { url, referer: item.referrer || '', title: name };
+      const res = await sendToApp(payload);
+
+      if (res && res.ok) {
+        recentlySent.set(url, Date.now());
+        await recordCapture({
+          url,
+          kind: '下载',
+          name: name || host(url),
+          host: host(url),
+          size: item.fileSize > 0 ? item.fileSize : 0,
+          referer: item.referrer || '',
+          ts: Date.now(),
+        });
+      } else {
+        // App went away between the ping and the hand-off — restore the native
+        // download so the file is never silently lost. Track the new id so the
+        // listener above skips it instead of looping.
+        try {
+          const id = await chrome.downloads.download({ url });
+          if (typeof id === 'number') selfDownloadIds.add(id);
+        } catch (e) {}
+      }
+    } finally {
+      inflightUrls.delete(url);
     }
   } catch (e) {
     // never let interception throw
