@@ -24,7 +24,13 @@ Future<void> main() async {
   await windowManager.ensureInitialized();
 
   try {
-    await Window.setEffect(effect: WindowEffect.hudWindow, dark: true);
+    // hudWindow is macOS-only; Windows gets acrylic. Either way the painted
+    // aurora background is the fallback when the native effect is unavailable.
+    await Window.setEffect(
+      effect:
+          Platform.isWindows ? WindowEffect.acrylic : WindowEffect.hudWindow,
+      dark: true,
+    );
   } catch (_) {
     // Vibrancy is a progressive enhancement; the painted aurora still works.
   }
@@ -47,8 +53,15 @@ Future<void> main() async {
   // locators can prefer them over any Homebrew install.
   await NativeBinaries.ensureExtracted();
 
-  final home = Platform.environment['HOME'];
-  final defaultDir = home == null ? null : '$home/Downloads';
+  final String? defaultDir;
+  if (Platform.isWindows) {
+    final profile = Platform.environment['USERPROFILE'];
+    defaultDir =
+        (profile != null && profile.isNotEmpty) ? '$profile\\Downloads' : null;
+  } else {
+    final home = Platform.environment['HOME'];
+    defaultDir = home != null ? '$home/Downloads' : null;
+  }
 
   final settings = SettingsController();
   await settings.load();

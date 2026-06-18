@@ -47,7 +47,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ inputs.release_tag }}" dist/Lumen-macOS.dmg \
+          gh release upload "${{ inputs.release_tag }}" \
+            dist/Lumen-macOS.dmg \
+            "scripts/macOS-无法打开请运行.command" \
             --repo "$GITHUB_REPOSITORY" --clobber
 
   build-windows:

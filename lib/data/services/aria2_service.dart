@@ -22,11 +22,13 @@ class Aria2Service {
   static const int _port = 6810;
   static const String _secret = 'lumen-local';
 
-  static const List<String> _candidates = [
-    '/opt/homebrew/bin/aria2c',
-    '/usr/local/bin/aria2c',
-    '/usr/bin/aria2c',
-  ];
+  static List<String> get _candidates => Platform.isWindows
+      ? const <String>[]
+      : const [
+          '/opt/homebrew/bin/aria2c',
+          '/usr/local/bin/aria2c',
+          '/usr/bin/aria2c',
+        ];
 
   /// Compact field set requested from aria2 to keep status payloads small.
   static const List<String> _keys = [
@@ -68,8 +70,16 @@ class Aria2Service {
       }
     }
     try {
-      final result = await Process.run('/bin/zsh', ['-lc', 'command -v aria2c'])
-          .timeout(const Duration(seconds: 5));
+      // No login shell on Windows; use `where`. macOS GUI apps don't inherit
+      // the shell PATH, so fall back to a login-shell lookup there.
+      final ProcessResult result;
+      if (Platform.isWindows) {
+        result = await Process.run('where', ['aria2c'])
+            .timeout(const Duration(seconds: 5));
+      } else {
+        result = await Process.run('/bin/zsh', ['-lc', 'command -v aria2c'])
+            .timeout(const Duration(seconds: 5));
+      }
       if (result.exitCode == 0) {
         final path = '${result.stdout}'.trim().split('\n').first.trim();
         if (path.isNotEmpty && await File(path).exists()) {
@@ -111,38 +121,78 @@ class Aria2Service {
     final binary = await _resolveBinary();
     if (binary == null) throw const Aria2NotInstalled();
 
-    final home = Platform.environment['HOME'];
     final dir = (defaultDir != null && defaultDir.trim().isNotEmpty)
         ? defaultDir.trim()
-        : (home != null ? '$home/Downloads' : '.');
+        : _defaultDownloadDir();
 
-    await Process.start(
-      binary,
-      [
-        '--enable-rpc=true',
-        '--rpc-listen-all=false',
-        '--rpc-listen-port=$_port',
-        '--rpc-secret=$_secret',
-        '--rpc-allow-origin-all=true',
-        '--continue=true',
-        '--dir=$dir',
-        '--seed-time=0',
-        '--bt-save-metadata=true',
-        '--follow-torrent=true',
-        '--max-concurrent-downloads=5',
-        '--summary-interval=0',
-        '--quiet=true',
-        '--enable-dht=true',
-        '--bt-enable-lpd=true',
-      ],
-      mode: ProcessStartMode.detached,
-    );
+    final args = <String>[
+      '--enable-rpc=true',
+      '--rpc-listen-all=false',
+      '--rpc-listen-port=$_port',
+      '--rpc-secret=$_secret',
+      '--rpc-allow-origin-all=true',
+      '--continue=true',
+      '--dir=$dir',
+      '--seed-time=0',
+      '--bt-save-metadata=true',
+      '--follow-torrent=true',
+      '--max-concurrent-downloads=5',
+      '--summary-interval=0',
+      '--quiet=true',
+      '--enable-dht=true',
+      '--bt-enable-lpd=true',
+      // HTTP multi-connection so aria2 alone matches Surge's throughput
+      // (harmless for torrents, which use their own connection settings).
+      '--split=16',
+      '--max-connection-per-server=16',
+      '--min-split-size=1M',
+    ];
+
+    // Persist the task list so downloads survive an app/daemon restart. This is
+    // essential on Windows (aria2 is the only engine) and a nice-to-have on
+    // macOS (the torrent list is restored on relaunch).
+    final session = await _ensureSessionFile();
+    if (session != null) {
+      if (await File(session).exists()) {
+        args.add('--input-file=$session');
+      }
+      args
+        ..add('--save-session=$session')
+        ..add('--save-session-interval=30')
+        ..add('--force-save=true');
+    }
+
+    await Process.start(binary, args, mode: ProcessStartMode.detached);
 
     for (var attempt = 0; attempt < 24; attempt++) {
       await Future<void>.delayed(const Duration(milliseconds: 300));
       if (await _ping()) return;
     }
     throw const Aria2RpcException('aria2 守护进程启动超时');
+  }
+
+  /// Platform default download directory, used when no explicit dir is given.
+  String _defaultDownloadDir() {
+    if (Platform.isWindows) {
+      final profile = Platform.environment['USERPROFILE'];
+      if (profile != null && profile.isNotEmpty) return '$profile\\Downloads';
+      return '.';
+    }
+    final home = Platform.environment['HOME'];
+    return home != null ? '$home/Downloads' : '.';
+  }
+
+  /// Path to aria2's saved-session file inside the app support dir, creating
+  /// the directory if needed. Returns null if no support dir is available.
+  Future<String?> _ensureSessionFile() async {
+    final dir = NativeBinaries.supportDir;
+    if (dir == null || dir.isEmpty) return null;
+    try {
+      await Directory(dir).create(recursive: true);
+    } catch (_) {
+      return null;
+    }
+    return '$dir${Platform.pathSeparator}aria2.session';
   }
 
   // ---- Operations ------------------------------------------------------------

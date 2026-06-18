@@ -4,10 +4,10 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/engine/download_engine.dart';
 import '../data/models/download_task.dart';
 import '../data/repository/download_repository.dart';
 import '../data/services/duplicate_detector.dart';
-import '../data/services/surge_daemon.dart';
 
 /// Sidebar filter selection.
 enum DownloadFilter { all, active, completed, failed }
@@ -209,10 +209,9 @@ class DownloadController extends ChangeNotifier {
       _consecutiveFailures = 0;
       await _poll();
       _scheduleNext();
-    } on SurgeNotInstalled {
+    } on EngineUnavailable catch (e) {
       connection = DaemonConnection.notInstalled;
-      errorMessage =
-          '未检测到 surge。请先安装(例如 brew install surge),再点击重试。';
+      errorMessage = e.message;
     } catch (e) {
       connection = DaemonConnection.error;
       errorMessage = '$e';
@@ -290,7 +289,7 @@ class DownloadController extends ChangeNotifier {
   }) async {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return 'URL 不能为空';
-    if (!_repo.ready) return 'Surge 守护进程尚未就绪';
+    if (!_repo.ready) return '下载引擎尚未就绪';
     final dir = (outputDir != null && outputDir.trim().isNotEmpty)
         ? outputDir
         : defaultOutputDir;
@@ -323,7 +322,7 @@ class DownloadController extends ChangeNotifier {
   }) async {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return const AddOutcome.failed('URL 不能为空');
-    if (!_repo.ready) return const AddOutcome.failed('Surge 守护进程尚未就绪');
+    if (!_repo.ready) return const AddOutcome.failed('下载引擎尚未就绪');
 
     final dir = (outputDir != null && outputDir.trim().isNotEmpty)
         ? outputDir.trim()
@@ -392,7 +391,7 @@ class DownloadController extends ChangeNotifier {
   Future<void> clean() => _mutate(() => _repo.clean());
 
   Future<String?> setGlobalLimit(String speed) async {
-    if (!_repo.ready) return 'Surge 守护进程尚未就绪';
+    if (!_repo.ready) return '下载引擎尚未就绪';
     final result = await _repo.limitGlobal(speed);
     await _poll();
     return result.ok ? null : result.message;
@@ -437,7 +436,7 @@ class DownloadController extends ChangeNotifier {
       if (_consecutiveFailures >= 3 &&
           connection == DaemonConnection.connected) {
         connection = DaemonConnection.error;
-        errorMessage = '与 Surge 守护进程的连接中断';
+        errorMessage = '与下载引擎的连接中断';
         _safeNotify();
       }
     } finally {

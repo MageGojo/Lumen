@@ -18,6 +18,8 @@ class SurgeLocator {
   ];
 
   static Future<String?> resolve() async {
+    // Surge is a macOS-only engine; the Windows build uses aria2 exclusively.
+    if (!Platform.isMacOS) return null;
     if (_cached != null) return _cached;
 
     final bundled = NativeBinaries.surgePath;

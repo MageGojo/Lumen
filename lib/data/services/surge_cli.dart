@@ -1,11 +1,6 @@
 import 'dart:io';
 
-/// Result of a Surge CLI invocation.
-class CliResult {
-  final bool ok;
-  final String message;
-  const CliResult(this.ok, this.message);
-}
+import '../engine/download_engine.dart';
 
 /// Write-path wrapper around the `surge` CLI subcommands.
 ///

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -446,8 +448,8 @@ class _StatusView extends StatelessWidget {
               const SizedBox(height: AppSpacing.lg),
               Text(
                 connecting
-                    ? '正在连接 Surge 引擎…'
-                    : (notInstalled ? '未检测到 Surge' : '连接已断开'),
+                    ? '正在连接下载引擎…'
+                    : (notInstalled ? '下载引擎未就绪' : '连接已断开'),
                 style: TextStyle(
                   color: AppColors.foreground,
                   fontSize: 17,
@@ -466,7 +468,7 @@ class _StatusView extends StatelessWidget {
                   ),
                 ),
               ],
-              if (notInstalled) ...[
+              if (notInstalled && !Platform.isWindows) ...[
                 const SizedBox(height: AppSpacing.md),
                 Container(
                   width: double.infinity,

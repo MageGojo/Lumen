@@ -62,10 +62,10 @@
 前往 **[Releases](https://github.com/MageGojo/Lumen/releases)** 下载:
 
 - **macOS(Apple Silicon)**:`Lumen-macOS.dmg` —— 打开后把 Lumen 拖进「应用程序」。
-  - 首次打开若提示「无法验证开发者」,在「系统设置 → 隐私与安全性」点「仍要打开」即可(应用未做公证)。
+  - 若提示「无法打开 / 已损坏 / 无法验证开发者」(应用未做付费公证),下载并**双击随附的 `macOS-无法打开请运行.command`** 即可一键修复(移除隔离标记 + 本地签名);或在「系统设置 → 隐私与安全性」点「仍要打开」。
 - **Windows**:`Lumen-Windows-Setup.exe`(或 `Lumen-Windows.zip` 解压即用)。
 
-> macOS 版内置了完整的 Surge + aria2 引擎闭包,开箱即用。Windows 版目前为界面预览版,完整引擎内置见 [Roadmap](#-roadmap)。
+> macOS 版内置完整的 Surge + aria2 双引擎闭包;Windows 版内置 aria2 单引擎(HTTP 多线程 + 磁力/BT)。两端引擎均随包分发、开箱即用,无需任何额外安装。
 
 ---
 
@@ -126,8 +126,8 @@ dart run flutter_launcher_icons
 ## 🏗 技术栈
 
 - **UI**:Flutter(自绘液态玻璃组件 + flutter_acrylic 原生毛玻璃)
-- **HTTP 引擎**:[Surge](https://github.com/SurgeDM/Surge)(Go)
-- **BT 引擎**:[aria2](https://github.com/aria2/aria2)
+- **下载引擎(macOS)**:[Surge](https://github.com/SurgeDM/Surge)(Go · HTTP) + [aria2](https://github.com/aria2/aria2)(磁力 / BT)
+- **下载引擎(Windows)**:[aria2](https://github.com/aria2/aria2) 单内核(HTTP 多线程 + 磁力 / BT)
 - **解析**:[apizero.cn](https://apizero.cn) API
 - **状态管理**:provider · 自适应轮询
 
@@ -135,7 +135,7 @@ dart run flutter_launcher_icons
 
 ## 🗺 Roadmap
 
-- [ ] Windows 引擎内置(随包分发 surge.exe / aria2c.exe)
+- [x] Windows 引擎内置(aria2 单内核,随包分发 aria2c.exe)
 - [ ] HLS(`.m3u8`)/ DASH 切片合并下载(接 ffmpeg)
 - [ ] macOS 公证签名 / Intel(x86_64)构建
 - [ ] SSE 事件流替代轮询,进一步降功耗
