@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Lumen 下载接管",
-  "version": "1.2.0",
+  "version": "1.2.2",
   "description": "接管浏览器下载,自动交给 Lumen 多线程下载(IDM 同款集成);可选嗅探页面视频 / 媒体。",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": [
     "downloads",
     "webRequest",
@@ -27,7 +33,13 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Lumen 下载接管"
+    "default_title": "Lumen 下载接管",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "options_page": "options.html"
 }
