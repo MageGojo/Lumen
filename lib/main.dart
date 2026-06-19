@@ -89,15 +89,32 @@ Future<void> main() async {
   // Lets the loopback bridge raise the duplicate prompt over the running app.
   final navigatorKey = GlobalKey<NavigatorState>();
 
-  // Loopback bridge for the sideloaded browser extension.
-  final bridge = LocalBridgeServer(
-    port: settings.bridgePort,
-    onAdd: (url, {referer, title, userAgent, headers}) async {
+  // Bring the window to the front, but at most once every few seconds. A plain
+  // download hand-off no longer raises the window at all (it stays silent and
+  // never steals focus); this is only used where the user must actually see the
+  // app — a parsed share link or a duplicate prompt — and the throttle stops a
+  // burst of bridge calls from turning into a window-popping storm.
+  var lastRaiseAt = 0;
+  // Synchronous + fire-and-forget so callers never open an async gap before
+  // touching a BuildContext (and a window raise needn't block the hand-off).
+  void raiseWindow() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - lastRaiseAt < 3000) return;
+    lastRaiseAt = now;
+    () async {
       try {
         await windowManager.show();
         await windowManager.focus();
       } catch (_) {}
+    }();
+  }
+
+  // Loopback bridge for the sideloaded browser extension.
+  final bridge = LocalBridgeServer(
+    port: settings.bridgePort,
+    onAdd: (url, {referer, title, userAgent, headers}) async {
       if (LinkClassifier.classify(url) == LinkRoute.share) {
+        raiseWindow();
         apiTools
           ..setApiKey(settings.apiKey)
           ..setBaseUrl(settings.parseBaseUrl);
@@ -116,6 +133,7 @@ Future<void> main() async {
         headers: headers,
         checkEnabled: settings.duplicateCheckEnabled && hasUi,
         onDuplicate: (report) async {
+          raiseWindow();
           final ctx = navigatorKey.currentState?.overlay?.context;
           if (ctx == null) return DuplicateDecision.cancel;
           return showDuplicateDialog(ctx, report);

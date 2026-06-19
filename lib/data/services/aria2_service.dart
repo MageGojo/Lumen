@@ -132,6 +132,10 @@ class Aria2Service {
       '--rpc-secret=$_secret',
       '--rpc-allow-origin-all=true',
       '--continue=true',
+      // Tasks restored from the saved session start PAUSED so an app/daemon
+      // relaunch never auto-starts a backlog of old downloads. User-/extension-
+      // initiated adds pass `pause:false` (see add()) to start immediately.
+      '--pause=true',
       '--dir=$dir',
       '--seed-time=0',
       '--bt-save-metadata=true',
@@ -158,8 +162,9 @@ class Aria2Service {
       }
       args
         ..add('--save-session=$session')
-        ..add('--save-session-interval=30')
-        ..add('--force-save=true');
+        ..add('--save-session-interval=30');
+      // Deliberately no --force-save: completed / removed downloads are NOT
+      // re-saved, so they can't reappear (and silently resume) on next launch.
     }
 
     await Process.start(binary, args, mode: ProcessStartMode.detached);
@@ -220,7 +225,11 @@ class Aria2Service {
   }) async {
     final rpc = _rpc;
     if (rpc == null) throw const Aria2RpcException('aria2 守护进程尚未就绪');
-    final options = <String, dynamic>{};
+    final options = <String, dynamic>{
+      // Global --pause=true keeps session-restored tasks paused; an explicit
+      // add (user or extension action) must start now, so override per-task.
+      'pause': 'false',
+    };
     if (dir != null && dir.trim().isNotEmpty) options['dir'] = dir.trim();
     if (out != null && out.trim().isNotEmpty) options['out'] = out.trim();
 

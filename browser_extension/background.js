@@ -140,6 +140,35 @@ function sweepRecent() {
   for (const [u, t] of recentlySent) if (t < cutoff) recentlySent.delete(u);
 }
 
+// Storm breaker — the key guard against "open the browser and the downloader
+// goes wild". A page that programmatically fires a burst of downloads (or a
+// backlog of auto-started requests on launch) must NOT be relayed to the app
+// one-by-one. We count recent take-overs in a sliding window; once the rate
+// looks abnormal we open a "circuit" for a cooldown, during which downloads are
+// left entirely to the browser (never cancelled, never sent). De-dupe only
+// catches the *same* URL fired twice; this catches a flood of *different* URLs.
+const STORM_WINDOW_MS = 10000;
+const STORM_LIMIT = 8; // take-overs per window before it counts as a storm
+const STORM_COOLDOWN_MS = 30000;
+let takeoverTimes = [];
+let circuitOpenUntil = 0;
+
+function stormActive() {
+  const now = Date.now();
+  if (now < circuitOpenUntil) return true;
+  takeoverTimes = takeoverTimes.filter((t) => now - t < STORM_WINDOW_MS);
+  if (takeoverTimes.length >= STORM_LIMIT) {
+    circuitOpenUntil = now + STORM_COOLDOWN_MS;
+    takeoverTimes = [];
+    return true;
+  }
+  return false;
+}
+
+function noteTakeover() {
+  takeoverTimes.push(Date.now());
+}
+
 chrome.downloads.onCreated.addListener(async (item) => {
   try {
     if (selfDownloadIds.has(item.id)) {
@@ -175,12 +204,18 @@ chrome.downloads.onCreated.addListener(async (item) => {
       return;
     }
 
+    // Storm breaker: during a burst (page-fired downloads, or a backlog on
+    // launch) stop taking over and let the browser handle them, so the app is
+    // never flooded with auto-started downloads.
+    if (stormActive()) return;
+
     // Detection gate (the safety net the README promises): only take over when
     // the app is actually reachable. If it isn't, leave the browser download
     // completely untouched — never cancel it, never spam the bridge.
     if (!(await isAppOnline())) return;
 
     inflightUrls.add(url);
+    noteTakeover();
     try {
       try { await chrome.downloads.cancel(item.id); } catch (e) {}
       try { await chrome.downloads.erase({ id: item.id }); } catch (e) {}
