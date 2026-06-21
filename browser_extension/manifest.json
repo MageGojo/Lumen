@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lumen 下载接管",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "接管浏览器下载,自动交给 Lumen 多线程下载(IDM 同款集成);可选嗅探页面视频 / 媒体。",
   "icons": {
     "16": "icons/icon16.png",

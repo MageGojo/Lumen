@@ -109,6 +109,20 @@ Future<void> main() async {
     }();
   }
 
+  // Desktop-side coalescing for the bridge: a page (or the extension after its
+  // MV3 worker restarts and loses its own de-dupe) can fire the same download
+  // repeatedly. Acknowledge an identical URL seen within this window without
+  // re-running the HEAD probe + directory scan + re-add, so a burst can't pile
+  // blocking work onto the UI isolate.
+  final recentAdds = <String, int>{};
+  bool addedRecently(String url) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    recentAdds.removeWhere((_, t) => now - t > 5000);
+    if (recentAdds.containsKey(url)) return true;
+    recentAdds[url] = now;
+    return false;
+  }
+
   // Loopback bridge for the sideloaded browser extension.
   final bridge = LocalBridgeServer(
     port: settings.bridgePort,
@@ -121,6 +135,11 @@ Future<void> main() async {
         await apiTools.parseShareLink(url);
         final err = apiTools.videoError;
         return BridgeResult(err == null, err ?? '已解析,请在应用内选择清晰度下载');
+      }
+      // Coalesce a burst of identical add requests (see addedRecently) so the
+      // same URL fired repeatedly doesn't re-probe + re-scan + re-queue.
+      if (addedRecently(url)) {
+        return const BridgeResult(true, '已在下载队列(忽略重复请求)');
       }
       // Only run the duplicate prompt when a UI surface is actually available;
       // otherwise fall back to a normal add so extension downloads never get

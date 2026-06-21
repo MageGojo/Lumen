@@ -23,9 +23,30 @@ let appOnline = false;
 let lastPingAt = 0;
 const PING_TTL_MS = 2500; // reuse a recent ping result instead of pinging per download
 
+// Settings are read on hot paths — every intercepted download and (via the
+// media sniffer) potentially every network response. Cache them in memory so we
+// don't hit chrome.storage.sync per event; the cache is invalidated whenever
+// settings actually change.
+let settingsCache = null;
+let settingsCacheAt = 0;
+const SETTINGS_TTL_MS = 3000;
+
 async function getSettings() {
-  return chrome.storage.sync.get(DEFAULT_SETTINGS);
+  const now = Date.now();
+  if (settingsCache && now - settingsCacheAt < SETTINGS_TTL_MS) {
+    return settingsCache;
+  }
+  settingsCache = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  settingsCacheAt = now;
+  return settingsCache;
 }
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync') {
+    settingsCache = null;
+    settingsCacheAt = 0;
+  }
+});
 
 function baseName(name) {
   if (!name) return '';
@@ -128,45 +149,114 @@ async function recordCapture(item) {
 
 // Downloads we re-create ourselves (the offline safety net) — never re-handle,
 // so a missed attribution can't turn it into an infinite cancel→restore loop.
+// In-memory is correct: an id only matters within one worker lifetime.
 const selfDownloadIds = new Set();
-// Short-term de-dupe: one logical download (or a quick re-fire of the same URL)
-// must not be handed off twice, which would pop the app window twice.
+// In-flight de-dupe within the current worker. Kept in memory on purpose: if the
+// worker is killed mid hand-off the entry simply vanishes, whereas persisting it
+// could wedge a URL as "in flight" forever. Cross-restart de-dupe lives in the
+// persisted guard below instead.
 const inflightUrls = new Set();
-const recentlySent = new Map(); // url -> timestamp
+
 const DEDUP_MS = 6000;
-
-function sweepRecent() {
-  const cutoff = Date.now() - DEDUP_MS;
-  for (const [u, t] of recentlySent) if (t < cutoff) recentlySent.delete(u);
-}
-
-// Storm breaker — the key guard against "open the browser and the downloader
-// goes wild". A page that programmatically fires a burst of downloads (or a
-// backlog of auto-started requests on launch) must NOT be relayed to the app
-// one-by-one. We count recent take-overs in a sliding window; once the rate
-// looks abnormal we open a "circuit" for a cooldown, during which downloads are
-// left entirely to the browser (never cancelled, never sent). De-dupe only
-// catches the *same* URL fired twice; this catches a flood of *different* URLs.
 const STORM_WINDOW_MS = 10000;
 const STORM_LIMIT = 8; // take-overs per window before it counts as a storm
 const STORM_COOLDOWN_MS = 30000;
-let takeoverTimes = [];
-let circuitOpenUntil = 0;
+// A fresh browser launch restores tabs and fires a burst of auto-downloads; hold
+// the circuit open this long on startup so that opening burst is left to the
+// browser (see chrome.runtime.onStartup below).
+const STARTUP_GRACE_MS = 8000;
 
-function stormActive() {
-  const now = Date.now();
-  if (now < circuitOpenUntil) return true;
-  takeoverTimes = takeoverTimes.filter((t) => now - t < STORM_WINDOW_MS);
-  if (takeoverTimes.length >= STORM_LIMIT) {
-    circuitOpenUntil = now + STORM_COOLDOWN_MS;
-    takeoverTimes = [];
+// MV3 service workers are evicted after ~30s idle and respawned per event, which
+// would reset an in-memory breaker / de-dupe to zero — exactly when a storm (or
+// a browser-launch burst) needs it most. So the guard (storm window + cooldown +
+// recent-sent set) lives in chrome.storage.session, which survives worker
+// recycling and is cleared when the browser quits. All read-modify-writes go
+// through withGuard() so concurrent download events can't clobber each other.
+const GUARD_KEY = 'sg_guard';
+let guardChain = Promise.resolve();
+
+function withGuard(fn) {
+  const run = guardChain.then(fn);
+  guardChain = run.then(() => {}, () => {});
+  return run;
+}
+
+async function loadGuard() {
+  try {
+    const data = await chrome.storage.session.get(GUARD_KEY);
+    const g = data[GUARD_KEY];
+    if (g && typeof g === 'object') {
+      return {
+        circuitOpenUntil: g.circuitOpenUntil || 0,
+        takeoverTimes: Array.isArray(g.takeoverTimes) ? g.takeoverTimes : [],
+        sent: g.sent && typeof g.sent === 'object' ? g.sent : {},
+      };
+    }
+  } catch (e) {}
+  return { circuitOpenUntil: 0, takeoverTimes: [], sent: {} };
+}
+
+async function saveGuard(g) {
+  try {
+    await chrome.storage.session.set({ [GUARD_KEY]: g });
+  } catch (e) {}
+}
+
+// Drop expired entries so the persisted guard can't grow without bound.
+function sweepGuard(g, now) {
+  g.takeoverTimes = g.takeoverTimes.filter((t) => now - t < STORM_WINDOW_MS);
+  for (const u of Object.keys(g.sent)) {
+    if (now - g.sent[u] >= DEDUP_MS) delete g.sent[u];
+  }
+}
+
+// True while inside a storm cooldown / startup grace, or when the take-over rate
+// just crossed the threshold (which itself opens the cooldown). De-dupe catches
+// the *same* URL fired twice; this catches a flood of *different* URLs.
+function stormActive(g, now) {
+  if (now < g.circuitOpenUntil) return true;
+  if (g.takeoverTimes.length >= STORM_LIMIT) {
+    g.circuitOpenUntil = now + STORM_COOLDOWN_MS;
+    g.takeoverTimes = [];
     return true;
   }
   return false;
 }
 
-function noteTakeover() {
-  takeoverTimes.push(Date.now());
+// Atomically decide what to do with a candidate take-over and, when proceeding,
+// reserve the slot (count the take-over + mark the URL sent) so a concurrent
+// event or a worker restart can neither double-count nor double-send.
+// Returns 'dup' | 'storm' | 'proceed'.
+async function decideTakeover(url) {
+  return withGuard(async () => {
+    const now = Date.now();
+    const g = await loadGuard();
+    sweepGuard(g, now);
+
+    if (inflightUrls.has(url) || g.sent[url]) {
+      await saveGuard(g);
+      return 'dup';
+    }
+    if (stormActive(g, now)) {
+      await saveGuard(g);
+      return 'storm';
+    }
+    g.takeoverTimes.push(now);
+    g.sent[url] = now;
+    await saveGuard(g);
+    inflightUrls.add(url);
+    return 'proceed';
+  });
+}
+
+// Roll back a reservation when the hand-off ultimately failed, so a later retry
+// of the same URL isn't silently swallowed by the de-dupe.
+async function releaseTakeover(url) {
+  return withGuard(async () => {
+    const g = await loadGuard();
+    delete g.sent[url];
+    await saveGuard(g);
+  });
 }
 
 chrome.downloads.onCreated.addListener(async (item) => {
@@ -194,28 +284,30 @@ chrome.downloads.onCreated.addListener(async (item) => {
       return;
     }
 
-    // De-dupe: if this exact URL is already in flight or was just sent, silently
-    // take over the duplicate (so the browser keeps no copy) but don't hand it
-    // to the app again — avoids a second window pop for one download.
-    sweepRecent();
-    if (inflightUrls.has(url) || recentlySent.has(url)) {
-      try { await chrome.downloads.cancel(item.id); } catch (e) {}
-      try { await chrome.downloads.erase({ id: item.id }); } catch (e) {}
-      return;
-    }
-
-    // Storm breaker: during a burst (page-fired downloads, or a backlog on
-    // launch) stop taking over and let the browser handle them, so the app is
-    // never flooded with auto-started downloads.
-    if (stormActive()) return;
-
     // Detection gate (the safety net the README promises): only take over when
     // the app is actually reachable. If it isn't, leave the browser download
     // completely untouched — never cancel it, never spam the bridge.
     if (!(await isAppOnline())) return;
 
-    inflightUrls.add(url);
-    noteTakeover();
+    // Atomically consult the (persisted) de-dupe + storm guard and reserve a
+    // slot. Persisted so a worker recycle mid-storm — or a cold worker on
+    // browser launch — can't reset the breaker and let a burst through.
+    const action = await decideTakeover(url);
+
+    // Storm in progress (page-fired flood or launch backlog): leave it to the
+    // browser entirely so the app is never flooded with auto-started downloads.
+    if (action === 'storm') return;
+
+    // Exact URL already in flight / just sent: swallow the browser's duplicate
+    // copy (so it keeps none) but don't hand it off again — no second add, no
+    // second window pop.
+    if (action === 'dup') {
+      try { await chrome.downloads.cancel(item.id); } catch (e) {}
+      try { await chrome.downloads.erase({ id: item.id }); } catch (e) {}
+      return;
+    }
+
+    // action === 'proceed': we hold the reservation; hand the download off.
     try {
       try { await chrome.downloads.cancel(item.id); } catch (e) {}
       try { await chrome.downloads.erase({ id: item.id }); } catch (e) {}
@@ -224,7 +316,6 @@ chrome.downloads.onCreated.addListener(async (item) => {
       const res = await sendToApp(payload);
 
       if (res && res.ok) {
-        recentlySent.set(url, Date.now());
         await recordCapture({
           url,
           kind: '下载',
@@ -235,9 +326,11 @@ chrome.downloads.onCreated.addListener(async (item) => {
           ts: Date.now(),
         });
       } else {
-        // App went away between the ping and the hand-off — restore the native
-        // download so the file is never silently lost. Track the new id so the
-        // listener above skips it instead of looping.
+        // App went away between the ping and the hand-off — release the de-dupe
+        // marker and restore the native download so the file is never silently
+        // lost. Track the new id so the listener above skips it instead of
+        // looping.
+        await releaseTakeover(url);
         try {
           const id = await chrome.downloads.download({ url });
           if (typeof id === 'number') selfDownloadIds.add(id);
@@ -279,11 +372,13 @@ async function getMedia(tabId) {
 }
 
 async function addMedia(tabId, raw) {
-  const s = await getSettings();
-  if (!s.sniff) return;
+  // Classify first (pure + synchronous): the overwhelming majority of inputs are
+  // non-media and bail here without touching storage.
   const kind = classifyMedia(raw.url, raw.type, raw.contentType);
   if (!kind) return;
   if (!/^https?:/i.test(raw.url)) return;
+  const s = await getSettings();
+  if (!s.sniff) return;
 
   const key = 'm' + tabId;
   const items = await getMedia(tabId);
@@ -306,8 +401,15 @@ chrome.webRequest.onHeadersReceived.addListener(
     if (d.tabId < 0) return;
     let ct = '';
     for (const h of d.responseHeaders || []) {
-      if (h.name.toLowerCase() === 'content-type') ct = h.value || '';
+      if (h.name.toLowerCase() === 'content-type') {
+        ct = h.value || '';
+        break;
+      }
     }
+    // Cheap synchronous gate: this fires for *every* response in *every* tab
+    // (images, scripts, fonts, XHR, beacons…). Bail on non-media inline — no
+    // async task, no storage read — so the sniffer can't drag the browser down.
+    if (!classifyMedia(d.url, d.type, ct)) return;
     addMedia(d.tabId, { url: d.url, type: d.type, contentType: ct });
   },
   { urls: ['<all_urls>'] },
@@ -340,6 +442,20 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ['page'],
   });
   setBadge();
+});
+
+// A fresh browser launch restores tabs, which fires a burst of auto-downloads.
+// Hold the circuit open for a short grace period so that opening burst is left
+// to the browser instead of flooding the app the instant it comes online — the
+// "open the browser and the downloader goes wild" case. Manual context-menu
+// sends bypass onCreated, so deliberate downloads still work during the grace.
+chrome.runtime.onStartup.addListener(async () => {
+  await withGuard(async () => {
+    const g = await loadGuard();
+    const until = Date.now() + STARTUP_GRACE_MS;
+    if (until > g.circuitOpenUntil) g.circuitOpenUntil = until;
+    await saveGuard(g);
+  });
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
