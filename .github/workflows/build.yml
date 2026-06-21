@@ -70,6 +70,57 @@ jobs:
       - name: Build Windows (release)
         run: flutter build windows --release
 
+      # Zero-install: Flutter's flutter_windows.dll (and the MSVC-built runner)
+      # dynamically link the VC++ 2015–2022 runtime. A clean machine without the
+      # "VC++ Redistributable" would crash on launch with a missing-DLL error, so
+      # we copy the redistributable CRT DLLs next to the .exe. Done before both
+      # the .zip and the installer package from the same Release folder.
+      - name: Bundle VC++ runtime (zero-install)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rel = "build/windows/x64/runner/Release"
+          $copied = @{}
+
+          # Prefer the official VS redistributable copies (Microsoft.VC14x.CRT).
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            $vs = & $vswhere -latest -products * -property installationPath
+            if ($vs) {
+              $redistRoot = Join-Path $vs 'VC\Redist\MSVC'
+              $ver = Get-ChildItem -Path $redistRoot -Directory -ErrorAction SilentlyContinue |
+                     Sort-Object Name -Descending | Select-Object -First 1
+              if ($ver) {
+                $crt = Get-ChildItem -Path $ver.FullName -Recurse -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue |
+                       Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+                if ($crt) {
+                  Get-ChildItem -Path $crt.FullName -Filter *.dll | ForEach-Object {
+                    Copy-Item $_.FullName $rel -Force
+                    $copied[$_.Name] = $true
+                  }
+                }
+              }
+            }
+          }
+
+          # Fallback: pull anything still missing straight from System32 (these
+          # are the redistributable Microsoft runtime DLLs).
+          $required = @('msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll')
+          $optional = @('msvcp140_1.dll','msvcp140_2.dll','concrt140.dll','vccorlib140.dll')
+          foreach ($n in ($required + $optional)) {
+            if (-not $copied.ContainsKey($n)) {
+              $sys = Join-Path $env:WINDIR "System32\$n"
+              if (Test-Path $sys) { Copy-Item $sys $rel -Force; $copied[$n] = $true }
+            }
+          }
+
+          Write-Host "Bundled runtime DLLs:"
+          Get-ChildItem $rel -Filter *140*.dll | Select-Object -ExpandProperty Name | Write-Host
+          # Fail loudly rather than shipping a zip that won't launch on a clean box.
+          foreach ($n in $required) {
+            if (-not (Test-Path (Join-Path $rel $n))) { throw "Missing required runtime DLL: $n" }
+          }
+
       - name: Package .zip
         shell: pwsh
         run: |
